@@ -75,3 +75,14 @@ func TestInjectStreamUsageMetadataPreservesSSEFrameTerminator(t *testing.T) {
 		t.Fatalf("expected usageMetadata injected, got %q", string(got))
 	}
 }
+
+func TestExtractOpenAIUsageSupportsResponsesUsageFields(t *testing.T) {
+	line := []byte(`data: {"usage":{"input_tokens":"11","output_tokens":"29","total_tokens":"40"}}`)
+	got, ok := extractOpenAIUsage(line)
+	if !ok {
+		t.Fatal("expected usage extracted from input/output usage fields")
+	}
+	if got.PromptTokens != 11 || got.CompletionTokens != 29 || got.TotalTokens != 40 {
+		t.Fatalf("unexpected usage extracted: %#v", got)
+	}
+}

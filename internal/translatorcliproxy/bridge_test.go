@@ -46,6 +46,22 @@ func TestFromOpenAINonStreamGeminiPreservesUsageFromOpenAI(t *testing.T) {
 	}
 }
 
+func TestFromOpenAINonStreamPreservesResponsesUsageShape(t *testing.T) {
+	original := []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`)
+	translatedReq := []byte(`{"model":"gemini-2.5-pro","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	openaibody := []byte(`{"id":"resp_1","object":"response","model":"gemini-2.5-pro","usage":{"input_tokens":"11","output_tokens":"29","total_tokens":"40"}}`)
+	gotGemini := string(FromOpenAINonStream(sdktranslator.FormatGemini, "gemini-2.5-pro", original, translatedReq, openaibody))
+	if !strings.Contains(gotGemini, `"promptTokenCount":11`) || !strings.Contains(gotGemini, `"candidatesTokenCount":29`) || !strings.Contains(gotGemini, `"totalTokenCount":40`) {
+		t.Fatalf("expected gemini usageMetadata from input/output usage fields, got: %s", gotGemini)
+	}
+
+	origClaude := []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	gotClaude := string(FromOpenAINonStream(sdktranslator.FormatClaude, "claude-sonnet-4-5", origClaude, origClaude, openaibody))
+	if !strings.Contains(gotClaude, `"input_tokens":11`) || !strings.Contains(gotClaude, `"output_tokens":29`) {
+		t.Fatalf("expected claude usage from input/output usage fields, got: %s", gotClaude)
+	}
+}
+
 func TestParseFormatAliases(t *testing.T) {
 	cases := map[string]sdktranslator.Format{
 		"responses":        sdktranslator.FormatOpenAIResponse,

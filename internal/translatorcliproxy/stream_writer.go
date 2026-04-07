@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v6/sdk/translator"
@@ -149,6 +150,12 @@ func extractOpenAIUsage(line []byte) (openAIUsage, bool) {
 	p := toInt(usageObj["prompt_tokens"])
 	c := toInt(usageObj["completion_tokens"])
 	t := toInt(usageObj["total_tokens"])
+	if p <= 0 {
+		p = toInt(usageObj["input_tokens"])
+	}
+	if c <= 0 {
+		c = toInt(usageObj["output_tokens"])
+	}
 	if p <= 0 && c <= 0 && t <= 0 {
 		return openAIUsage{}, false
 	}
@@ -221,6 +228,12 @@ func toInt(v any) int {
 		return int(x)
 	case float32:
 		return int(x)
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(x))
+		if err != nil {
+			return 0
+		}
+		return n
 	default:
 		return 0
 	}
