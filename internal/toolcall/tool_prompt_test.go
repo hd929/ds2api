@@ -24,3 +24,107 @@ func TestBuildToolCallInstructions_ExecuteCommandUsesCommandExample(t *testing.T
 		t.Fatalf("expected command parameter example for execute_command, got: %s", out)
 	}
 }
+
+func TestBuildToolCallInstructions_BashUsesCommandAndDescriptionExamples(t *testing.T) {
+	out := BuildToolCallInstructions([]string{"Bash"})
+	blocks := findInvokeBlocks(out, "Bash")
+	if len(blocks) == 0 {
+		t.Fatalf("expected Bash examples, got: %s", out)
+	}
+
+	sawDescription := false
+	for _, block := range blocks {
+		if !strings.Contains(block, `<parameter name="command">`) {
+			t.Fatalf("expected every Bash example to use command parameter, got: %s", block)
+		}
+		if strings.Contains(block, `<parameter name="path">`) || strings.Contains(block, `<parameter name="content">`) {
+			t.Fatalf("expected Bash examples not to use file write parameters, got: %s", block)
+		}
+		if strings.Contains(block, `<parameter name="description">`) {
+			sawDescription = true
+		}
+	}
+	if !sawDescription {
+		t.Fatalf("expected Bash long-script example to include description, got: %s", out)
+	}
+	if strings.Contains(out, `<invoke name="Read">`) {
+		t.Fatalf("expected examples to avoid unavailable hard-coded Read tool, got: %s", out)
+	}
+}
+
+func TestBuildToolCallInstructions_ExecuteCommandLongScriptUsesCommand(t *testing.T) {
+	out := BuildToolCallInstructions([]string{"execute_command"})
+	blocks := findInvokeBlocks(out, "execute_command")
+	if len(blocks) == 0 {
+		t.Fatalf("expected execute_command examples, got: %s", out)
+	}
+
+	for _, block := range blocks {
+		if !strings.Contains(block, `<parameter name="command">`) {
+			t.Fatalf("expected execute_command examples to use command parameter, got: %s", block)
+		}
+		if strings.Contains(block, `<parameter name="path">`) || strings.Contains(block, `<parameter name="content">`) {
+			t.Fatalf("expected execute_command examples not to use file write parameters, got: %s", block)
+		}
+	}
+	if !strings.Contains(out, `test_escape.sh`) {
+		t.Fatalf("expected execute_command long-script example, got: %s", out)
+	}
+}
+
+func TestBuildToolCallInstructions_ExecCommandLongScriptUsesCmd(t *testing.T) {
+	out := BuildToolCallInstructions([]string{"exec_command"})
+	blocks := findInvokeBlocks(out, "exec_command")
+	if len(blocks) == 0 {
+		t.Fatalf("expected exec_command examples, got: %s", out)
+	}
+
+	for _, block := range blocks {
+		if !strings.Contains(block, `<parameter name="cmd">`) {
+			t.Fatalf("expected exec_command examples to use cmd parameter, got: %s", block)
+		}
+		if strings.Contains(block, `<parameter name="command">`) || strings.Contains(block, `<parameter name="path">`) || strings.Contains(block, `<parameter name="content">`) {
+			t.Fatalf("expected exec_command examples not to use command or file write parameters, got: %s", block)
+		}
+	}
+	if !strings.Contains(out, `test_escape.sh`) {
+		t.Fatalf("expected exec_command long-script example, got: %s", out)
+	}
+}
+
+func TestBuildToolCallInstructions_WriteUsesFilePathAndContent(t *testing.T) {
+	out := BuildToolCallInstructions([]string{"Write"})
+	blocks := findInvokeBlocks(out, "Write")
+	if len(blocks) == 0 {
+		t.Fatalf("expected Write examples, got: %s", out)
+	}
+
+	for _, block := range blocks {
+		if !strings.Contains(block, `<parameter name="file_path">`) || !strings.Contains(block, `<parameter name="content">`) {
+			t.Fatalf("expected Write examples to use file_path and content, got: %s", block)
+		}
+		if strings.Contains(block, `<parameter name="path">`) {
+			t.Fatalf("expected Write examples not to use path, got: %s", block)
+		}
+	}
+}
+
+func findInvokeBlocks(text, name string) []string {
+	open := `<invoke name="` + name + `">`
+	remaining := text
+	blocks := []string{}
+	for {
+		start := strings.Index(remaining, open)
+		if start < 0 {
+			return blocks
+		}
+		remaining = remaining[start:]
+		end := strings.Index(remaining, `</invoke>`)
+		if end < 0 {
+			return blocks
+		}
+		end += len(`</invoke>`)
+		blocks = append(blocks, remaining[:end])
+		remaining = remaining[end:]
+	}
+}
