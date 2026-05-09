@@ -91,7 +91,7 @@ func TestExecuteNonStreamWithRetryBuildsCanonicalTurn(t *testing.T) {
 
 func TestExecuteNonStreamWithRetryUsesParentMessageForEmptyRetry(t *testing.T) {
 	ds := &fakeDeepSeekCaller{responses: []*http.Response{
-		sseHTTPResponse(http.StatusOK, `data: {"response_message_id":77,"p":"response/status","v":"FINISHED"}`),
+		sseHTTPResponse(http.StatusOK, `data: {"response_message_id":77,"p":"response/thinking_content","v":"plan"}`),
 		sseHTTPResponse(http.StatusOK, `data: {"response_message_id":78,"p":"response/content","v":"ok"}`),
 	}}
 	stdReq := promptcompat.StandardRequest{

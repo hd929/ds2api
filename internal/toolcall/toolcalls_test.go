@@ -111,6 +111,27 @@ func TestParseToolCallsSupportsArbitraryPrefixedToolMarkup(t *testing.T) {
 	}
 }
 
+func TestParseToolCallsSupportsFullwidthDSMLShell(t *testing.T) {
+	text := `<ｄＳＭＬ｜tool_calls>
+  <ｄＳＭＬ｜invoke name="Read">
+    <ｄＳＭＬ｜parameter name="file_path"＞<![CDATA[/Users/aq/Desktop/myproject/Personal_Blog/README.md]]＞</ｄＳＭＬ｜parameter>
+  </ｄＳＭＬ｜invoke>
+  <ｄＳＭＬ｜invoke name="Read">
+    <ｄＳＭＬ｜parameter name="file_path"＞<![CDATA[/Users/aq/Desktop/myproject/Personal_Blog/index.html]]＞</ｄＳＭＬ｜parameter>
+  </ｄＳＭＬ｜invoke>
+</ｄＳＭＬ｜tool_calls>`
+	calls := ParseToolCalls(text, []string{"Read"})
+	if len(calls) != 2 {
+		t.Fatalf("expected two fullwidth DSML calls, got %#v", calls)
+	}
+	if calls[0].Name != "Read" || calls[0].Input["file_path"] != "/Users/aq/Desktop/myproject/Personal_Blog/README.md" {
+		t.Fatalf("unexpected first fullwidth DSML call: %#v", calls[0])
+	}
+	if calls[1].Name != "Read" || calls[1].Input["file_path"] != "/Users/aq/Desktop/myproject/Personal_Blog/index.html" {
+		t.Fatalf("unexpected second fullwidth DSML call: %#v", calls[1])
+	}
+}
+
 func TestParseToolCallsIgnoresBareHyphenatedToolCallsLookalike(t *testing.T) {
 	text := `<tool-calls><invoke name="Bash"><parameter name="command">pwd</parameter></invoke></tool-calls>`
 	calls := ParseToolCalls(text, []string{"Bash"})

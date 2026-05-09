@@ -1,6 +1,9 @@
 package toolcall
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 type toolMarkupNameAlias struct {
 	raw       string
@@ -184,7 +187,7 @@ func scanToolMarkupTagAt(text string, start int) (ToolMarkupTag, bool) {
 }
 
 func IsPartialToolMarkupTagPrefix(text string) bool {
-	if text == "" || text[0] != '<' || strings.Contains(text, ">") {
+	if text == "" || text[0] != '<' || strings.Contains(text, ">") || strings.Contains(text, "＞") {
 		return false
 	}
 	i := 1
@@ -236,9 +239,10 @@ func consumeToolMarkupNamePrefixOnce(text string, idx int) (int, bool) {
 		return idx + 1, true
 	}
 	if hasASCIIPrefixFoldAt(text, idx, "dsml") {
-		next := idx + len("dsml")
-		if next < len(text) && (text[next] == '-' || text[next] == '_') {
-			next++
+		dsmlLen, _ := matchASCIIPrefixFoldAt(text, idx, "dsml")
+		next := idx + dsmlLen
+		if sep, size := normalizedASCIIAt(text, next); sep == '-' || sep == '_' {
+			next += size
 		}
 		return next, true
 	}
@@ -249,12 +253,17 @@ func consumeToolMarkupNamePrefixOnce(text string, idx int) (int, bool) {
 }
 
 func consumeArbitraryToolMarkupNamePrefix(text string, idx int) (int, bool) {
-	if idx < 0 || idx >= len(text) || !isToolMarkupPrefixSegmentByte(text[idx]) {
+	nextSegment, ok := consumeToolMarkupPrefixSegment(text, idx)
+	if !ok {
 		return idx, false
 	}
-	j := idx + 1
-	for j < len(text) && isToolMarkupPrefixSegmentByte(text[j]) {
-		j++
+	j := nextSegment
+	for {
+		nextSegment, ok = consumeToolMarkupPrefixSegment(text, j)
+		if !ok {
+			break
+		}
+		j = nextSegment
 	}
 	k := j
 	for k < len(text) && (text[k] == ' ' || text[k] == '\t' || text[k] == '\r' || text[k] == '\n') {
@@ -262,8 +271,8 @@ func consumeArbitraryToolMarkupNamePrefix(text string, idx int) (int, bool) {
 	}
 	next, ok := consumeToolMarkupPipe(text, k)
 	if !ok {
-		if k < len(text) && (text[k] == '_' || text[k] == '-') {
-			next = k + 1
+		if sep, size := normalizedASCIIAt(text, k); sep == '_' || sep == '-' {
+			next = k + size
 			ok = true
 		}
 	}
@@ -279,21 +288,32 @@ func consumeArbitraryToolMarkupNamePrefix(text string, idx int) (int, bool) {
 	return next, true
 }
 
-func isToolMarkupPrefixSegmentByte(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+func consumeToolMarkupPrefixSegment(text string, idx int) (int, bool) {
+	ch, size := normalizedASCIIAt(text, idx)
+	if size <= 0 {
+		return idx, false
+	}
+	if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
+		return idx + size, true
+	}
+	return idx, false
 }
 
 func hasASCIIPartialPrefixFoldAt(text string, start int, prefix string) bool {
-	remain := len(text) - start
-	if remain <= 0 || remain > len(prefix) {
+	if start < 0 || start >= len(text) {
 		return false
 	}
-	for j := 0; j < remain; j++ {
-		if asciiLower(text[start+j]) != asciiLower(prefix[j]) {
+	idx := start
+	matched := 0
+	for matched < len(prefix) && idx < len(text) {
+		ch, size := normalizedASCIIAt(text, idx)
+		if size <= 0 || asciiLower(ch) != asciiLower(prefix[matched]) {
 			return false
 		}
+		idx += size
+		matched++
 	}
-	return true
+	return matched > 0 && matched < len(prefix) && idx == len(text)
 }
 
 func hasToolMarkupNamePrefix(text string, start int) bool {
@@ -313,8 +333,8 @@ func matchToolMarkupName(text string, start int, dsmlLike bool) (string, int) {
 		if name.dsmlOnly && !dsmlLike {
 			continue
 		}
-		if hasASCIIPrefixFoldAt(text, start, name.raw) {
-			return name.canonical, len(name.raw)
+		if nameLen, ok := matchASCIIPrefixFoldAt(text, start, name.raw); ok {
+			return name.canonical, nameLen
 		}
 	}
 	return "", 0
@@ -341,6 +361,29 @@ func hasToolMarkupBoundary(text string, idx int) bool {
 	case ' ', '\t', '\n', '\r', '>', '/':
 		return true
 	default:
-		return false
+		r, _ := utf8.DecodeRuneInString(text[idx:])
+		return normalizeFullwidthASCII(r) == '>'
 	}
+}
+
+func normalizedASCIIAt(text string, idx int) (byte, int) {
+	if idx < 0 || idx >= len(text) {
+		return 0, 0
+	}
+	r, size := utf8.DecodeRuneInString(text[idx:])
+	if r == utf8.RuneError && size == 0 {
+		return 0, 0
+	}
+	normalized := normalizeFullwidthASCII(r)
+	if normalized > 0x7f {
+		return 0, 0
+	}
+	return byte(normalized), size
+}
+
+func normalizeFullwidthASCII(r rune) rune {
+	if r >= '！' && r <= '～' {
+		return r - 0xFEE0
+	}
+	return r
 }

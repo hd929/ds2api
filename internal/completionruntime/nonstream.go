@@ -90,7 +90,11 @@ func ExecuteNonStreamWithRetry(ctx context.Context, ds DeepSeekCaller, a *auth.R
 	if startErr != nil {
 		return NonStreamResult{SessionID: start.SessionID, Payload: start.Payload}, startErr
 	}
-	stdReq = start.Request
+	return ExecuteNonStreamStartedWithRetry(ctx, ds, a, start, opts)
+}
+
+func ExecuteNonStreamStartedWithRetry(ctx context.Context, ds DeepSeekCaller, a *auth.RequestAuth, start StartResult, opts Options) (NonStreamResult, *assistantturn.OutputError) {
+	stdReq := start.Request
 	maxAttempts := opts.MaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = 3

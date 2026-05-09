@@ -112,6 +112,23 @@ test('parseToolCalls parses arbitrary-prefixed tool markup shells', () => {
   }
 });
 
+test('parseToolCalls parses fullwidth DSML shell drift', () => {
+  const payload = `<ｄＳＭＬ｜tool_calls>
+  <ｄＳＭＬ｜invoke name="Read">
+    <ｄＳＭＬ｜parameter name="file_path"＞<![CDATA[/Users/aq/Desktop/myproject/Personal_Blog/README.md]]＞</ｄＳＭＬ｜parameter>
+  </ｄＳＭＬ｜invoke>
+  <ｄＳＭＬ｜invoke name="Read">
+    <ｄＳＭＬ｜parameter name="file_path"＞<![CDATA[/Users/aq/Desktop/myproject/Personal_Blog/index.html]]＞</ｄＳＭＬ｜parameter>
+  </ｄＳＭＬ｜invoke>
+</ｄＳＭＬ｜tool_calls>`;
+  const calls = parseToolCalls(payload, ['Read']);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].name, 'Read');
+  assert.deepEqual(calls[0].input, { file_path: '/Users/aq/Desktop/myproject/Personal_Blog/README.md' });
+  assert.equal(calls[1].name, 'Read');
+  assert.deepEqual(calls[1].input, { file_path: '/Users/aq/Desktop/myproject/Personal_Blog/index.html' });
+});
+
 test('parseToolCalls ignores bare hyphenated tool_calls lookalike', () => {
   const payload = '<tool-calls><invoke name="Bash"><parameter name="command">pwd</parameter></invoke></tool-calls>';
   const calls = parseToolCalls(payload, ['Bash']);
