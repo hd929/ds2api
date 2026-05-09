@@ -1228,3 +1228,37 @@ func TestProcessToolSieveDSMLBarePrefixVariantDoesNotLeak(t *testing.T) {
 		t.Fatalf("expected one tool call from DSML bare prefix variant, got %d events=%#v", toolCalls, events)
 	}
 }
+
+func TestProcessToolSieveCJKAngleDSMDriftDoesNotLeak(t *testing.T) {
+	var state State
+	chunks := []string{
+		"<DSM｜tool_calls>\n",
+		"<DSM｜invoke name=\"Bash\">\n",
+		"<DSM｜parameter name=\"description\"｜>〈![CDATA[Check tracking branch status]]〉〈/DSM｜parameter〉\n",
+		"<DSM｜parameter name=\"command\"｜>〈![CDATA[git status -b --short]]〉〈/DSM｜parameter〉\n",
+		"〈/DSM｜invoke〉\n",
+		"〈/DSM｜tool_calls〉",
+	}
+	var events []Event
+	for _, c := range chunks {
+		events = append(events, ProcessChunk(&state, c, []string{"Bash"})...)
+	}
+	events = append(events, Flush(&state, []string{"Bash"})...)
+
+	var textContent string
+	var calls []toolcall.ParsedToolCall
+	for _, evt := range events {
+		textContent += evt.Content
+		calls = append(calls, evt.ToolCalls...)
+	}
+
+	if strings.Contains(textContent, "DSM") || strings.Contains(textContent, "git status") {
+		t.Fatalf("CJK-angle DSM drift leaked to text: %q events=%#v", textContent, events)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected one CJK-angle DSM drift tool call, got %d events=%#v", len(calls), events)
+	}
+	if calls[0].Name != "Bash" || calls[0].Input["command"] != "git status -b --short" {
+		t.Fatalf("unexpected CJK-angle DSM drift call: %#v", calls[0])
+	}
+}

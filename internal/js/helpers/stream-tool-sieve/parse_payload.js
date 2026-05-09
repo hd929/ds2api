@@ -1,6 +1,6 @@
 'use strict';
 
-const CDATA_PATTERN = /^<!\[CDATA\[([\s\S]*?)]](?:>|＞)$/i;
+const CDATA_PATTERN = /^(?:<|〈)!\[CDATA\[([\s\S]*?)]](?:>|＞|〉)$/i;
 const XML_ATTR_PATTERN = /\b([a-z0-9_:-]+)\s*=\s*("([^"]*)"|'([^']*)')/gi;
 const TOOL_MARKUP_NAMES = [
   { raw: 'tool_calls', canonical: 'tool_calls' },
@@ -431,26 +431,31 @@ function skipXmlIgnoredSection(lower, i) {
 function findCDATAEnd(text, from) {
   const ascii = text.indexOf(']]>', from);
   const fullwidth = text.indexOf(']]＞', from);
-  if (ascii < 0 && fullwidth < 0) {
+  const cjk = text.indexOf(']]〉', from);
+  if (ascii < 0 && fullwidth < 0 && cjk < 0) {
     return { index: -1, len: 0 };
   }
-  if (ascii < 0) {
-    return { index: fullwidth, len: ']]＞'.length };
+  let best = { index: -1, len: 0 };
+  for (const candidate of [
+    { index: ascii, len: ']]>'.length },
+    { index: fullwidth, len: ']]＞'.length },
+    { index: cjk, len: ']]〉'.length },
+  ]) {
+    if (candidate.index >= 0 && (best.index < 0 || candidate.index < best.index)) {
+      best = candidate;
+    }
   }
-  if (fullwidth < 0 || ascii < fullwidth) {
-    return { index: ascii, len: ']]>'.length };
-  }
-  return { index: fullwidth, len: ']]＞'.length };
+  return best;
 }
 
 function scanToolMarkupTagAt(text, start) {
   const raw = toStringSafe(text);
-  if (!raw || start < 0 || start >= raw.length || raw[start] !== '<') {
+  if (!raw || start < 0 || start >= raw.length || normalizeFullwidthASCIIChar(raw[start]) !== '<') {
     return null;
   }
   const lower = raw.toLowerCase();
   let i = start + 1;
-  while (i < raw.length && raw[i] === '<') {
+  while (i < raw.length && normalizeFullwidthASCIIChar(raw[i]) === '<') {
     i += 1;
   }
   const closing = raw[i] === '/';
@@ -822,6 +827,12 @@ function normalizeFullwidthASCIIChar(ch) {
   if (!ch) {
     return ch;
   }
+  if (ch === '〈') {
+    return '<';
+  }
+  if (ch === '〉') {
+    return '>';
+  }
   const code = ch.charCodeAt(0);
   if (code >= 0xff01 && code <= 0xff5e) {
     return String.fromCharCode(code - 0xfee0);
@@ -858,9 +869,28 @@ function matchNormalizedASCII(raw, start, expected) {
 
 function normalizeToolMarkupTagTailForXML(tail) {
   let out = '';
-  for (const ch of typeof tail === 'string' ? tail : String(tail || '')) {
+  const raw = typeof tail === 'string' ? tail : String(tail || '');
+  let quote = '';
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i];
     const normalized = normalizeFullwidthASCIIChar(ch);
-    if (['>', '/', '=', '"', "'"].includes(normalized)) {
+    if (quote) {
+      out += normalized;
+      if (normalized === quote) {
+        quote = '';
+      }
+    } else if (normalized === '"' || normalized === "'") {
+      quote = normalized;
+      out += normalized;
+    } else if (normalized === '|') {
+      let j = i + 1;
+      while (j < raw.length && [' ', '\t', '\r', '\n'].includes(raw[j])) {
+        j += 1;
+      }
+      if (normalizeFullwidthASCIIChar(raw[j] || '') !== '>') {
+        out += normalized;
+      }
+    } else if (['>', '/', '='].includes(normalized)) {
       out += normalized;
     } else {
       out += ch;

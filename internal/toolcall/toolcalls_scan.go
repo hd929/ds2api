@@ -134,12 +134,17 @@ func FindMatchingToolMarkupClose(text string, open ToolMarkupTag) (ToolMarkupTag
 }
 
 func scanToolMarkupTagAt(text string, start int) (ToolMarkupTag, bool) {
-	if start < 0 || start >= len(text) || text[start] != '<' {
+	next, ok := consumeToolMarkupLessThan(text, start)
+	if !ok {
 		return ToolMarkupTag{}, false
 	}
-	i := start + 1
-	for i < len(text) && text[i] == '<' {
-		i++
+	i := next
+	for {
+		next, ok := consumeToolMarkupLessThan(text, i)
+		if !ok {
+			break
+		}
+		i = next
 	}
 	closing := false
 	if i < len(text) && text[i] == '/' {
@@ -459,6 +464,14 @@ func consumeToolMarkupPipe(text string, idx int) (int, bool) {
 	return idx, false
 }
 
+func consumeToolMarkupLessThan(text string, idx int) (int, bool) {
+	ch, size := normalizedASCIIAt(text, idx)
+	if size <= 0 || ch != '<' {
+		return idx, false
+	}
+	return idx + size, true
+}
+
 func hasToolMarkupBoundary(text string, idx int) bool {
 	if idx >= len(text) {
 		return true
@@ -488,6 +501,12 @@ func normalizedASCIIAt(text string, idx int) (byte, int) {
 }
 
 func normalizeFullwidthASCII(r rune) rune {
+	switch r {
+	case '〈':
+		return '<'
+	case '〉':
+		return '>'
+	}
 	if r >= '！' && r <= '～' {
 		return r - 0xFEE0
 	}

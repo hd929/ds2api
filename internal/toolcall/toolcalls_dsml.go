@@ -65,6 +65,7 @@ func normalizeToolMarkupTagTailForXML(tail string) string {
 	}
 	var b strings.Builder
 	b.Grow(len(tail))
+	quote := rune(0)
 	for i := 0; i < len(tail); {
 		r, size := utf8.DecodeRuneInString(tail[i:])
 		if r == utf8.RuneError && size == 1 {
@@ -72,9 +73,38 @@ func normalizeToolMarkupTagTailForXML(tail string) string {
 			i++
 			continue
 		}
-		switch normalizeFullwidthASCII(r) {
-		case '>', '/', '=', '"', '\'':
-			b.WriteRune(normalizeFullwidthASCII(r))
+		ch := normalizeFullwidthASCII(r)
+		if quote != 0 {
+			b.WriteRune(ch)
+			if ch == quote {
+				quote = 0
+			}
+			i += size
+			continue
+		}
+		switch ch {
+		case '"', '\'':
+			quote = ch
+			b.WriteRune(ch)
+		case '|':
+			j := i + size
+			for j < len(tail) {
+				next, nextSize := utf8.DecodeRuneInString(tail[j:])
+				if nextSize <= 0 {
+					break
+				}
+				if next == ' ' || next == '\t' || next == '\r' || next == '\n' {
+					j += nextSize
+					continue
+				}
+				break
+			}
+			next, _ := normalizedASCIIAt(tail, j)
+			if next != '>' {
+				b.WriteRune(ch)
+			}
+		case '>', '/', '=':
+			b.WriteRune(ch)
 		default:
 			b.WriteString(tail[i : i+size])
 		}

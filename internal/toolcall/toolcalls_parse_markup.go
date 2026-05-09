@@ -305,19 +305,23 @@ func indexToolCDATAClose(text string, from int) int {
 	}
 	asciiIdx := strings.Index(text[from:], "]]>")
 	fullIdx := strings.Index(text[from:], "]]＞")
-	if asciiIdx < 0 && fullIdx < 0 {
+	cjkIdx := strings.Index(text[from:], "]]〉")
+	if asciiIdx < 0 && fullIdx < 0 && cjkIdx < 0 {
 		return -1
 	}
-	if asciiIdx < 0 {
-		return from + fullIdx
+	best := -1
+	for _, idx := range []int{asciiIdx, fullIdx, cjkIdx} {
+		if idx >= 0 && (best < 0 || idx < best) {
+			best = idx
+		}
 	}
-	if fullIdx < 0 || asciiIdx < fullIdx {
-		return from + asciiIdx
-	}
-	return from + fullIdx
+	return from + best
 }
 
 func toolCDATACloseLenAt(text string, idx int) int {
+	if strings.HasPrefix(text[idx:], "]]〉") {
+		return len("]]〉")
+	}
 	if strings.HasPrefix(text[idx:], "]]＞") {
 		return len("]]＞")
 	}

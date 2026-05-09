@@ -129,6 +129,29 @@ test('parseToolCalls parses fullwidth DSML shell drift', () => {
   assert.deepEqual(calls[1].input, { file_path: '/Users/aq/Desktop/myproject/Personal_Blog/index.html' });
 });
 
+test('parseToolCalls parses CJK-angle DSM drift', () => {
+  const payload = `<DSM｜tool_calls>
+<DSM｜invoke name="Bash">
+<DSM｜parameter name="description"｜>〈![CDATA[Show commits on local dev not on origin/dev]]〉〈/DSM｜parameter〉
+<DSM｜parameter name="command"｜>〈![CDATA[git log --oneline origin/dev..dev]]〉〈/DSM｜parameter〉
+〈/DSM｜invoke〉
+<DSM｜invoke name="Bash">
+<DSM｜parameter name="description"｜>〈![CDATA[Show commits on origin/dev not on local dev]]〉〈/DSM｜parameter〉
+<DSM｜parameter name="command"｜>〈![CDATA[git log --oneline dev..origin/dev]]〉〈/DSM｜parameter〉
+〈/DSM｜invoke〉
+<DSM｜invoke name="Bash">
+<DSM｜parameter name="description"｜>〈![CDATA[Check tracking branch status]]〉〈/DSM｜parameter〉
+<DSM｜parameter name="command"｜>〈![CDATA[git status -b --short]]〉〈/DSM｜parameter〉
+〈/DSM｜invoke〉
+〈/DSM｜tool_calls〉`;
+  const calls = parseToolCalls(payload, ['Bash']);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0].name, 'Bash');
+  assert.equal(calls[0].input.command, 'git log --oneline origin/dev..dev');
+  assert.equal(calls[1].input.description, 'Show commits on origin/dev not on local dev');
+  assert.equal(calls[2].input.command, 'git status -b --short');
+});
+
 test('parseToolCalls parses DSML control separator drift', () => {
   for (const sep of ['␂', '\x02']) {
     const payload = `<DSML${sep}tool_calls>
@@ -521,6 +544,22 @@ test('sieve emits tool_calls for arbitrary-prefixed tool tags', () => {
   const text = collectText(events);
   assert.equal(text.includes('proto'), false);
   assert.equal(text.includes('💥'), false);
+});
+
+test('sieve emits tool_calls for CJK-angle DSM drift', () => {
+  const events = runSieve([
+    '<DSM｜tool_calls>\n',
+    '<DSM｜invoke name="Bash">\n',
+    '<DSM｜parameter name="description"｜>〈![CDATA[Check tracking branch status]]〉〈/DSM｜parameter〉\n',
+    '<DSM｜parameter name="command"｜>〈![CDATA[git status -b --short]]〉〈/DSM｜parameter〉\n',
+    '〈/DSM｜invoke〉\n',
+    '〈/DSM｜tool_calls〉',
+  ], ['Bash']);
+  const finalCalls = events.flatMap((evt) => (evt.type === 'tool_calls' ? evt.calls : []));
+  assert.equal(finalCalls.length, 1);
+  assert.equal(finalCalls[0].name, 'Bash');
+  assert.equal(finalCalls[0].input.command, 'git status -b --short');
+  assert.equal(collectText(events), '');
 });
 
 test('sieve emits all-empty arbitrary-prefixed tool tags without leaking text', () => {

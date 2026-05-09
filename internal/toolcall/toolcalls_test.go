@@ -132,6 +132,37 @@ func TestParseToolCallsSupportsFullwidthDSMLShell(t *testing.T) {
 	}
 }
 
+func TestParseToolCallsSupportsCJKAngleDSMDrift(t *testing.T) {
+	text := `<DSM｜tool_calls>
+<DSM｜invoke name="Bash">
+<DSM｜parameter name="description"｜>〈![CDATA[Show commits on local dev not on origin/dev]]〉〈/DSM｜parameter〉
+<DSM｜parameter name="command"｜>〈![CDATA[git log --oneline origin/dev..dev]]〉〈/DSM｜parameter〉
+〈/DSM｜invoke〉
+<DSM｜invoke name="Bash">
+<DSM｜parameter name="description"｜>〈![CDATA[Show commits on origin/dev not on local dev]]〉〈/DSM｜parameter〉
+<DSM｜parameter name="command"｜>〈![CDATA[git log --oneline dev..origin/dev]]〉〈/DSM｜parameter〉
+〈/DSM｜invoke〉
+<DSM｜invoke name="Bash">
+<DSM｜parameter name="description"｜>〈![CDATA[Check tracking branch status]]〉〈/DSM｜parameter〉
+<DSM｜parameter name="command"｜>〈![CDATA[git status -b --short]]〉〈/DSM｜parameter〉
+〈/DSM｜invoke〉
+〈/DSM｜tool_calls〉`
+
+	calls := ParseToolCalls(text, []string{"Bash"})
+	if len(calls) != 3 {
+		t.Fatalf("expected three CJK-angle DSM drift calls, got %#v", calls)
+	}
+	if calls[0].Name != "Bash" || calls[0].Input["command"] != "git log --oneline origin/dev..dev" {
+		t.Fatalf("unexpected first CJK-angle DSM drift call: %#v", calls[0])
+	}
+	if calls[1].Name != "Bash" || calls[1].Input["description"] != "Show commits on origin/dev not on local dev" {
+		t.Fatalf("unexpected second CJK-angle DSM drift call: %#v", calls[1])
+	}
+	if calls[2].Name != "Bash" || calls[2].Input["command"] != "git status -b --short" {
+		t.Fatalf("unexpected third CJK-angle DSM drift call: %#v", calls[2])
+	}
+}
+
 func TestParseToolCallsIgnoresBareHyphenatedToolCallsLookalike(t *testing.T) {
 	text := `<tool-calls><invoke name="Bash"><parameter name="command">pwd</parameter></invoke></tool-calls>`
 	calls := ParseToolCalls(text, []string{"Bash"})
