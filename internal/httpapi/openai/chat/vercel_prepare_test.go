@@ -68,14 +68,16 @@ func TestVercelInternalSecret(t *testing.T) {
 
 func TestStreamLeaseLifecycle(t *testing.T) {
 	h := &Handler{}
-	leaseID := h.holdStreamLease(&auth.RequestAuth{UseConfigToken: false})
+	leaseID := h.holdStreamLease(&auth.RequestAuth{UseConfigToken: false}, promptcompat.StandardRequest{}, "test-session-id")
 	if leaseID == "" {
 		t.Fatalf("expected non-empty lease id")
 	}
-	if ok := h.releaseStreamLease(leaseID); !ok {
+	if lease, ok := h.releaseStreamLease(leaseID); !ok {
 		t.Fatalf("expected lease release success")
+	} else if lease.SessionID != "test-session-id" {
+		t.Fatalf("expected released session id, got %q", lease.SessionID)
 	}
-	if ok := h.releaseStreamLease(leaseID); ok {
+	if _, ok := h.releaseStreamLease(leaseID); ok {
 		t.Fatalf("expected duplicate release to fail")
 	}
 }
@@ -207,6 +209,108 @@ func TestHandleVercelStreamPrepareUsesHalfwidthDSMLToolPrompt(t *testing.T) {
 	toolNames, _ := body["tool_names"].([]any)
 	if len(toolNames) != 1 || toolNames[0] != "search" {
 		t.Fatalf("expected prepared tool names to align with request tools, got %#v", body["tool_names"])
+	}
+}
+
+type vercelReleaseAutoDeleteDSStub struct {
+	resp             *http.Response
+	deleteCallCount  int
+	deletedSessionID string
+	deletedToken     string
+	deleteErr        error
+	events           *[]string
+}
+
+func (m *vercelReleaseAutoDeleteDSStub) CreateSession(_ context.Context, _ *auth.RequestAuth, _ int) (string, error) {
+	return "session-id", nil
+}
+
+func (m *vercelReleaseAutoDeleteDSStub) GetPow(_ context.Context, _ *auth.RequestAuth, _ int) (string, error) {
+	return "pow", nil
+}
+
+func (m *vercelReleaseAutoDeleteDSStub) UploadFile(_ context.Context, _ *auth.RequestAuth, _ dsclient.UploadFileRequest, _ int) (*dsclient.UploadFileResult, error) {
+	return &dsclient.UploadFileResult{ID: "file-id", Filename: "file.txt", Bytes: 1, Status: "uploaded"}, nil
+}
+
+func (m *vercelReleaseAutoDeleteDSStub) CallCompletion(_ context.Context, _ *auth.RequestAuth, _ map[string]any, _ string, _ int) (*http.Response, error) {
+	return m.resp, nil
+}
+
+func (m *vercelReleaseAutoDeleteDSStub) DeleteSessionForToken(_ context.Context, token string, sessionID string) (*dsclient.DeleteSessionResult, error) {
+	if m.events != nil {
+		*m.events = append(*m.events, "delete")
+	}
+	m.deleteCallCount++
+	m.deletedSessionID = sessionID
+	m.deletedToken = token
+	if m.deleteErr != nil {
+		return nil, m.deleteErr
+	}
+	return &dsclient.DeleteSessionResult{SessionID: sessionID, Success: true}, nil
+}
+
+func (m *vercelReleaseAutoDeleteDSStub) DeleteAllSessionsForToken(_ context.Context, _ string) error {
+	return nil
+}
+
+type vercelReleaseAuthStub struct {
+	events *[]string
+}
+
+func (a *vercelReleaseAuthStub) Determine(_ *http.Request) (*auth.RequestAuth, error) {
+	return &auth.RequestAuth{DeepSeekToken: "test-token", AccountID: "test-account"}, nil
+}
+
+func (a *vercelReleaseAuthStub) DetermineCaller(_ *http.Request) (*auth.RequestAuth, error) {
+	return &auth.RequestAuth{DeepSeekToken: "test-token", AccountID: "test-account"}, nil
+}
+
+func (a *vercelReleaseAuthStub) Release(_ *auth.RequestAuth) {
+	if a.events != nil {
+		*a.events = append(*a.events, "release")
+	}
+}
+
+func TestHandleVercelStreamReleaseTriggersAutoDelete(t *testing.T) {
+	t.Setenv("VERCEL", "1")
+	t.Setenv("DS2API_VERCEL_INTERNAL_SECRET", "stream-secret")
+
+	events := []string{}
+	ds := &vercelReleaseAutoDeleteDSStub{events: &events}
+	h := &Handler{
+		Store: mockOpenAIConfig{
+			autoDeleteMode: "single",
+		},
+		Auth: &vercelReleaseAuthStub{events: &events},
+		DS:   ds,
+	}
+
+	leaseID := h.holdStreamLease(&auth.RequestAuth{DeepSeekToken: "test-token", AccountID: "test-account"}, promptcompat.StandardRequest{}, "session-to-delete")
+	if leaseID == "" {
+		t.Fatalf("expected non-empty lease id")
+	}
+
+	reqBody := map[string]any{"lease_id": leaseID}
+	reqJSON, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions?__stream_release=1", strings.NewReader(string(reqJSON)))
+	req.Header.Set("X-Ds2-Internal-Token", "stream-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.handleVercelStreamRelease(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if ds.deleteCallCount != 1 {
+		t.Fatalf("expected auto delete call count=1, got %d", ds.deleteCallCount)
+	}
+	if ds.deletedSessionID != "session-to-delete" {
+		t.Fatalf("expected deleted session id=session-to-delete, got %q", ds.deletedSessionID)
+	}
+	if got, want := strings.Join(events, ","), "delete,release"; got != want {
+		t.Fatalf("expected auto-delete before auth release, got %s", got)
 	}
 }
 
@@ -367,7 +471,7 @@ func TestHandleVercelStreamSwitchReuploadsCurrentInputFile(t *testing.T) {
 		RefFileIDs: []string{"file-old", "file-old-tools", "client-file"},
 		Thinking:   true,
 	}
-	leaseID := h.holdStreamLease(a, stdReq)
+	leaseID := h.holdStreamLease(a, stdReq, "")
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions?__stream_switch=1", strings.NewReader(`{"lease_id":"`+leaseID+`"}`))
 	req.Header.Set("X-Ds2-Internal-Token", "stream-secret")
 	rec := httptest.NewRecorder()

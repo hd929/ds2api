@@ -97,7 +97,7 @@ func (h *Handler) handleVercelStreamPrepare(w http.ResponseWriter, r *http.Reque
 	}
 
 	payload := stdReq.CompletionPayload(sessionID)
-	leaseID := h.holdStreamLease(a, stdReq)
+	leaseID := h.holdStreamLease(a, stdReq, sessionID)
 	if leaseID == "" {
 		writeOpenAIError(w, http.StatusInternalServerError, "failed to create stream lease")
 		return
@@ -141,9 +141,16 @@ func (h *Handler) handleVercelStreamRelease(w http.ResponseWriter, r *http.Reque
 		writeOpenAIError(w, http.StatusBadRequest, "lease_id is required")
 		return
 	}
-	if !h.releaseStreamLease(leaseID) {
+	lease, ok := h.releaseStreamLease(leaseID)
+	if !ok {
 		writeOpenAIError(w, http.StatusNotFound, "stream lease not found")
 		return
+	}
+	if h.Auth != nil && lease.Auth != nil {
+		defer h.Auth.Release(lease.Auth)
+	}
+	if lease.Auth != nil {
+		h.autoDeleteRemoteSession(r.Context(), lease.Auth, lease.SessionID)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
@@ -245,7 +252,7 @@ func (h *Handler) handleVercelStreamSwitch(w http.ResponseWriter, r *http.Reques
 		writeOpenAIError(w, http.StatusUnauthorized, "Account token is invalid. Please re-login the account in admin.")
 		return
 	}
-	h.updateStreamLeaseStandard(leaseID, stdReq)
+	h.updateStreamLeaseState(leaseID, stdReq, sessionID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id":       sessionID,
 		"lease_id":         leaseID,
@@ -298,13 +305,9 @@ func vercelInternalSecret() string {
 	return "admin"
 }
 
-func (h *Handler) holdStreamLease(a *auth.RequestAuth, standards ...promptcompat.StandardRequest) string {
+func (h *Handler) holdStreamLease(a *auth.RequestAuth, stdReq promptcompat.StandardRequest, sessionID string) string {
 	if a == nil {
 		return ""
-	}
-	var stdReq promptcompat.StandardRequest
-	if len(standards) > 0 {
-		stdReq = standards[0]
 	}
 	now := time.Now()
 	ttl := streamLeaseTTL()
@@ -321,6 +324,7 @@ func (h *Handler) holdStreamLease(a *auth.RequestAuth, standards ...promptcompat
 	h.streamLeases[leaseID] = streamLease{
 		Auth:      a,
 		Standard:  stdReq,
+		SessionID: sessionID,
 		ExpiresAt: now.Add(ttl),
 	}
 	h.leaseMu.Unlock()
@@ -350,7 +354,7 @@ func (h *Handler) lookupStreamLeaseAuth(leaseID string) *auth.RequestAuth {
 	return lease.Auth
 }
 
-func (h *Handler) updateStreamLeaseStandard(leaseID string, stdReq promptcompat.StandardRequest) {
+func (h *Handler) updateStreamLeaseState(leaseID string, stdReq promptcompat.StandardRequest, sessionID string) {
 	leaseID = strings.TrimSpace(leaseID)
 	if leaseID == "" {
 		return
@@ -362,13 +366,14 @@ func (h *Handler) updateStreamLeaseStandard(leaseID string, stdReq promptcompat.
 		return
 	}
 	lease.Standard = stdReq
+	lease.SessionID = sessionID
 	h.streamLeases[leaseID] = lease
 }
 
-func (h *Handler) releaseStreamLease(leaseID string) bool {
+func (h *Handler) releaseStreamLease(leaseID string) (streamLease, bool) {
 	leaseID = strings.TrimSpace(leaseID)
 	if leaseID == "" {
-		return false
+		return streamLease{}, false
 	}
 
 	h.leaseMu.Lock()
@@ -381,12 +386,9 @@ func (h *Handler) releaseStreamLease(leaseID string) bool {
 	h.releaseExpiredAuths(expired)
 
 	if !ok {
-		return false
+		return streamLease{}, false
 	}
-	if h.Auth != nil {
-		h.Auth.Release(lease.Auth)
-	}
-	return true
+	return lease, true
 }
 
 func (h *Handler) popExpiredLeasesLocked(now time.Time) []*auth.RequestAuth {
